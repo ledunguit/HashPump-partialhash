@@ -1,5 +1,7 @@
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <getopt.h>
+#include <stdint.h>
 #include <openssl/sha.h>
 #include "SHA1.h"
 #include "MD5ex.h"
@@ -113,15 +115,18 @@ void PrintHelp()
 	cout << "     -d --data          The data from the known message." << endl;
 	cout << "     -a --additional    The information you would like to add to the known message." << endl;
 	cout << "     -k --keylength     The length in bytes of the key being used to sign the original message with." << endl;
+	cout << "     -u --unknown     number if leading hash bits unknown (EXPERIMENTAL HACK)" << endl;
+	cout << "     -z --sig2     target signature (EXPERIMENTAL HACK)" << endl;
 	cout << "     Version 1.0 with MD5, SHA1, SHA256 and SHA512 support." << endl;
 	cout << "     <Developed by bwall(@bwallHatesTwits)>" << endl;
 }
 
 int main(int argc, char ** argv)
 {
-	string sig;
+	string sig, sig2;
 	string data;
 	int keylength = 0;
+	int unknown = 0;
 	string datatoadd;
 	Extender * sex = NULL;
 	bool run_tests = false;
@@ -135,11 +140,13 @@ int main(int argc, char ** argv)
 			{"data", required_argument, 0, 0},
 			{"additional", required_argument, 0, 0},
 			{"keylength", required_argument, 0, 0},
+			{"unknown", required_argument, 0, 0},
+			{"sig2", required_argument, 0, 0},
 			{"help", no_argument, 0, 0},
 			{0, 0, 0, 0}
 		};
 
-		int c = getopt_long(argc, argv, "ts:d:a:k:h", long_options, &option_index);
+		int c = getopt_long(argc, argv, "ts:d:a:k:u:z:h", long_options, &option_index);
 		if (c == -1)
 			break;
 
@@ -149,16 +156,11 @@ int main(int argc, char ** argv)
 			switch(option_index)
 			{
 			case 0:
+			case 't':
 				run_tests = true;
 				break;
 			case 1:
 				sig.assign(optarg);
-				sex = GetExtenderForHash(sig);
-				if(sex == NULL)
-				{
-					cout << "Unsupported signature size." << endl;
-					return 0;
-				}
 				break;
 			case 2:
 				data.assign(optarg);
@@ -170,21 +172,20 @@ int main(int argc, char ** argv)
 				keylength = atoi(optarg);
 				break;
 			case 5:
+				unknown = atoi(optarg);
+				break;
+			case 6:
+				sig2.assign(optarg);
+				break;
+			case 7:
 				PrintHelp();
 				return 0;
 			}
 			break;
-			case 't':
 				run_tests = true;
 				break;
 			case 's':
 				sig.assign(optarg);
-				sex = GetExtenderForHash(sig);
-				if(sex == NULL)
-				{
-					cout << "Unsupported hash size." << endl;
-					return 0;
-				}
 				break;
 			case 'd':
 				data.assign(optarg);
@@ -194,6 +195,12 @@ int main(int argc, char ** argv)
 				break;
 			case 'k':
 				keylength = atoi(optarg);
+				break;
+			case 'u':
+				unknown = atoi(optarg);
+				break;
+			case 'z':
+				sig2.assign(optarg);
 				break;
 			case 'h':
 				PrintHelp();
@@ -257,9 +264,62 @@ int main(int argc, char ** argv)
 	vector<unsigned char> vtoadd = StringToVector((unsigned char*)datatoadd.c_str());
 
 	unsigned char firstSig[128];
+	unsigned char targetSig[128];
 	DigestToRaw(sig, firstSig);
-	unsigned char * secondSig;
-	vector<unsigned char> * secondMessage = sex->GenerateStretchedData(vmessage, keylength, firstSig, vtoadd, &secondSig);
+	DigestToRaw(sig2, targetSig);
+	unsigned char * secondSig = 0;
+
+
+	sex = GetExtenderForHash(sig);
+	if(sex == NULL)
+	{
+		cout << "Unsupported signature size." << endl;
+		return 0;
+	}
+	uint32_t maxval = 1 << unknown;
+	uint32_t mask = ~ ((1<<(unknown)) - 1);
+	printf("mask: %x\n", mask);
+	vector<unsigned char> * secondMessage = 0;
+	uint32_t *sigStart = (uint32_t*)&firstSig;
+	uint32_t part1 = htonl(*sigStart);
+	for (uint32_t prefix =0; prefix <= maxval; prefix++) {
+		if (prefix % (1<<20) == 0) {
+			float part = (float)prefix/maxval;
+			printf("progress: 0x%16x, %.4f: ", prefix, part);
+#define WIDTH 40
+			for(int i=0; i < WIDTH; i++) {
+				if (float(i)/WIDTH < part)
+					printf("=");
+				else {
+					printf(" ");
+				}
+			}
+			printf("|\r");
+			fflush(stdout);
+		}
+		uint32_t shiftedPrefix = prefix << (32-unknown);
+		*sigStart = htonl(part1 | shiftedPrefix);
+
+		// all this allocation and deallocation is a stupid idea
+		if (secondSig)
+			delete[] secondSig;
+		if (secondMessage)
+			delete secondMessage;
+		secondMessage = sex->GenerateStretchedData(vmessage, keylength, firstSig, vtoadd, &secondSig);
+		// cheating a bit: if the lower 96 bit match, we're probably lucky.
+		if (memcmp(secondSig+4, targetSig+4, 12) == 0) {
+			printf("\nsuccess with origHash = ");
+			for(unsigned int x = 0; x < sig.size()/2; x++)
+			{
+				printf("%02x", firstSig[x]);
+			}
+			printf("\n");
+			printf("prefix: 0x%x\n", prefix);
+			break;
+		} else {
+		}
+	}
+	printf("predicted sig: ");
 	for(unsigned int x = 0; x < sig.size()/2; x++)
 	{
 		printf("%02x", secondSig[x]);
