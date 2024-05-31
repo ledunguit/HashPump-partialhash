@@ -1,11 +1,13 @@
 CC=g++
 CFLAGS=-c -Wall
 INSTALLLOCATION=/usr/bin/
+LIB=lib
+INCLUDE=openssl
 
 all: hashpump
 
 hashpump: main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o
-	$(CC) main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o -lcrypto -o hashpump
+	$(CC) main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o -I$(INCLUDE) -L$(LIB) -lcrypto -o hashpump
 
 main.o:
 	$(CC) $(CFLAGS) main.cpp
