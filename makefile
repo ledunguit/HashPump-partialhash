@@ -5,7 +5,7 @@ INSTALLLOCATION=/usr/bin/
 all: hashpump
 
 hashpump: main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o
-	$(CC) main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o -lcrypto -o hashpump
+	$(CC) main.o Extender.o MD4ex.o MD5ex.o SHA1.o SHA256.o SHA512ex.o -Iopenssl -Llib -lcrypto -o hashpump
 
 main.o:
 	$(CC) $(CFLAGS) main.cpp
